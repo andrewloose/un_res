@@ -1,0 +1,420 @@
+MongoDB Demonstration!
+
+This demonstration will cover how to use MongoDB in order to gain insights about resolutions at the United Nations over the years!
+We can see what topics are voted on most frequently, how many voted in a particular fashion, etc.
+
+To Start:
+Run mongoimport from command prompt ("exit" to exit mongo client)
+Imports can also be performed from the compass client
+
+$ mongoimport --db demo --collection resolutions --file $HOME/data/un_res.json
+Sometimes, this gives us an error. It may look like this - 
+andrewloose@Andrews-MacBook-Pro hw3 % mongoimport -d unitednations -c resolutions --file un_res.json
+2024-02-22T19:20:13.980-0500	connected to: mongodb://localhost/
+2024-02-22T19:20:13.998-0500	Failed: cannot decode array into a primitive.D
+2024-02-22T19:20:13.998-0500	0 document(s) imported successfully. 0 document(s) failed to import.
+
+If this error is returned, try this instead to turn it into a jsonArray object. This should fix the issue.
+$ mongoimport --db demo --collection resolutions --file $HOME/data/un_res.json --jsonArray
+
+
+
+
+How do we examine what is in this JSON dataset? Simply use .find({})!
+unitednations> db.resolutions.find()
+
+It will return all entries within the dataset, which is around 4500 resolutions.
+They all follow this format, with some having null values in certain spots.
+{
+    _id: ObjectId('65d7e4d144b8ec9c5c16b654'),
+    id: 9920,
+    symbol: 'S/RES/483(1980)',
+    title: 'Resolution 483 (1980)',
+    description: 'on renewal of the mandate of the UN Interim Force in Lebanon',
+    date: Long('329011200000'),
+    meeting_number: '2258th meeting',
+    organization_un_entity: 'Israel-Lebanon Mixed Armistice Commission',
+    topics: 'PEACEKEEPING OPERATIONS, LEBANON, ARMISTICES, ISRAEL, LEBANON, LEBANON SITUATION, MIDDLE EAST SITUATION',
+    url: 'https://digitallibrary.un.org/record/17835',
+    subjects: null,
+    related_symbol: 'S/PV.2258',
+    last_update: Long('1706832000000'),
+    year: 1980,
+    voting: { yes: '12', no: 0, abstain: 2, voting_yes_percentage: 85 }
+  },
+As we can see, the entry has the subfield "voting". In it, the votes are counted, and the percentage of votes in agreement are counted in "voting_yes_percentage"
+
+
+
+
+SEARCH QUERIES and AGGREGATIONS
+We will start with some basic search queries.
+1.
+Say we had a particular resolution we wanted to look up. How would we find it and all of its data?
+unitednations> db.resolutions.find({title: 'Resolution 477 (1980)'})
+[
+  {
+    _id: ObjectId('65d7e4d144b8ec9c5c16b3a0'),
+    id: 9223,
+    symbol: 'S/RES/477(1980)',
+    title: 'Resolution 477 (1980)',
+    description: 'on admission of Zimbabwe to membership in the United Nations',
+    date: Long('333763200000'),
+    meeting_number: '2244th meeting',
+    organization_un_entity: 'UN',
+    topics: 'ZIMBABWE, MEMBERS',
+    url: 'https://digitallibrary.un.org/record/25617',
+    subjects: null,
+    related_symbol: 'S/PV.2244',
+    last_update: Long('1706832000000'),
+    year: 1980,
+    voting: {
+      yes: 'Adopted unanimously',
+      no: null,
+      abstain: null,
+      voting_yes_percentage: 100
+    }
+  }
+]
+Lets introduce another basic function, .count(). This is added after your query constraints.
+2.
+How would we find the number of resolutions voted on in the year 2000?
+unitednations> db.resolutions.find({year:2000}).count()
+112
+
+Lets introduce aggregations. They involve multiple constraints that you can add to make sure your data is refined properly.
+You can group, match, sort, limit the data to a certain number of outputs, and more. Here are some examples.
+
+
+What UN Offices appear the most in the database?
+3.
+unitednations> db.resolutions.aggregate([
+...    {
+...       $group: {
+...          _id: "$organization_un_entity",
+...          count: { $sum: 1 }
+...       }
+...    },
+...    {
+...       $sort: { count: -1 }
+...    },
+...    {
+...       $limit: 10
+...    }
+... ])
+[
+  { _id: null, count: 826 },
+  { _id: 'UN', count: 219 },
+  { _id: 'UN Disengagement Observer Force', count: 155 },
+  { _id: 'UN Peacekeeping Force in Cyprus', count: 96 },
+  { _id: 'UN Interim Force in Lebanon', count: 84 },
+  { _id: 'UN. Security Council', count: 60 },
+  { _id: 'UN. Secretary-General', count: 59 },
+  {
+    _id: 'UN. Compensation Commission. Panel of Commissioners for Claims in Category E',
+    count: 58
+  },
+  { _id: 'ICJ', count: 50 },
+  { _id: 'UN Protection Force', count: 45 }
+]
+4.
+What are the top 10 years with the most resolutions in the data?
+db.resolutions.aggregate([
+    {
+        $match: {
+            year: { $exists: true } // Ensure "year" field exists
+        }
+    },
+    {
+        $group: {
+            _id: "$year", // Use the "year" field directly
+            count: { $sum: 1 } // Count the number of entries for each year
+        }
+    },
+    {
+        $project: {
+            _id: 0, // Exclude the original "_id" field
+            year: "$_id", // Rename "_id" to "year"
+            count: 1 // Include the "count" field
+        }
+    },
+    {
+        $sort: { count: -1 } // Sort in descending order based on count
+    },
+    {
+        $limit: 10 // Limit to the top 10 years
+    }
+])
+
+Within the JSON file, there is a space for the collection of one-title subjects in which the particular resolution aims to solve.
+5.
+# What are the top 10 most frequent SUBJECTS in the database?
+unitednations> db.resolutions.aggregate([
+...    {
+...       $unwind: "$subjects"
+...    },
+...    {
+...       $group: {
+...          _id: "$subjects",
+...          count: { $sum: 1 }
+...       }
+...    },
+...    {
+...       $sort: { count: -1 }
+...    },
+...    {
+...       $limit: 10
+...    }
+... ])
+[
+  { _id: 'FORMER YUGOSLAVIA SITUATION', count: 202 },
+  { _id: 'SOMALIA SITUATION', count: 150 },
+  { _id: 'MIDDLE EAST SITUATION', count: 136 },
+  { _id: 'IRAQ-KUWAIT SITUATION', count: 119 },
+  { _id: 'TERRORISM', count: 90 },
+  { _id: 'SUDAN--POLITICAL CONDITIONS', count: 79 },
+  { _id: 'AFGHANISTAN SITUATION', count: 75 },
+  { _id: 'INTERNATIONAL SECURITY', count: 74 },
+  { _id: 'DEMOCRATIC REPUBLIC OF THE CONGO SITUATION', count: 71 },
+  { _id: 'UN--MEMBERS', count: 70 }
+6.
+  What are the most frequent combinations of topics/related topics?
+  unitednations> db.resolutions.aggregate([
+  ...    {
+  ...       $unwind: "$topics"
+  ...    },
+  ...    {
+  ...       $group: {
+  ...          _id: "$topics",
+  ...          count: { $sum: 1 }
+  ...       }
+  ...    },
+  ...    {
+  ...       $sort: { count: -1 }
+  ...    },
+  ...    {
+  ...       $limit: 10
+  ...    }
+  ... ])
+  [
+    {
+      _id: 'WAR DAMAGE COMPENSATION, CLAIMS, PAYMENTS ARRANGEMENTS, IRAQ-KUWAIT SITUATION',
+      count: 107
+    },
+    {
+      _id: 'PEACEKEEPING OPERATIONS, CYPRUS, CYPRUS QUESTION',
+      count: 42
+    },
+    {
+      _id: 'TRUCE SUPERVISION, MIDDLE EAST, MIDDLE EAST SITUATION',
+      count: 39
+    },
+    {
+      _id: 'PEACEKEEPING OPERATIONS, MIDDLE EAST, MIDDLE EAST SITUATION',
+      count: 39
+    },
+    {
+      _id: 'WAR DAMAGE COMPENSATION, PAYMENTS ARRANGEMENTS, CLAIMS, IRAQ-KUWAIT SITUATION',
+      count: 33
+    },
+    {
+      _id: 'PEACEKEEPING OPERATIONS, LEBANON, MIDDLE EAST SITUATION',
+      count: 23
+    },
+    {
+      _id: 'CLAIMS, WAR DAMAGE COMPENSATION, IRAQ-KUWAIT SITUATION',
+      count: 22
+    },
+    {
+      _id: 'WAR DAMAGE COMPENSATION, CLAIMS, IRAQ-KUWAIT SITUATION',
+      count: 16
+    },
+    {
+      _id: 'PEACEKEEPING OPERATIONS, CYPRUS, CYPRUS QUESTION, GOOD OFFICES',
+      count: 14
+    },
+    { _id: 'TRUCE SUPERVISION, MIDDLE EAST SITUATION', count: 14 }
+  ]
+7.
+Two frequent topics in the database are the ongoing conflicts between Turkey and Cyprus as well as Israel and Palestine. How many times are these respective countries mentioned?
+unitednations> db.resolutions.aggregate([
+...    {
+...       $match: {
+...          topics: { $regex: /ISRAEL/i } // Match topics containing "ISRAEL"; 'i' for case-insensitivity
+...       }
+...    },
+...    {
+...       $unwind: "$topics"
+...    },
+...    {
+...       $group: {
+...          _id: null,
+...          countIsrael: { $sum: 1 }
+...       }
+...    },
+...    {
+...       $project: {
+...          _id: 0,
+...          countIsrael: 1
+...       }
+...    },
+...    {
+...       $unionWith: {
+...          coll: "resolutions",
+...          pipeline: [
+...             {
+...                $match: {
+...                   topics: { $regex: /CYPRUS/i } // Match topics containing "CYPRUS"; 'i' for case-insensitivity
+...                }
+...             },
+...             {
+...                $unwind: "$topics"
+...             },
+...             {
+...                $group: {
+...                   _id: null,
+...                   countCyprus: { $sum: 1 }
+...                }
+...             },
+...             {
+...                $project: {
+...                   _id: 0,
+...                   countCyprus: 1
+...                }
+...             }
+...          ]
+...       }
+...    }
+... ])
+[ { countIsrael: 167 }, { countCyprus: 179 } ]
+
+
+
+The JSON file also has the year of the resolution's release. It also contains a subfield, titled voting. Let's examine the subfield.
+In the subfield, there is a voting_yes_percentage key. This determines the percentage of voters on the UNSC that voted in agreement with the resolution.
+(Pecentage used, as UNSC seating has expanded since its inception to include nonpermenant members outside of the Permanent 5, who are USA, UK, France, Russia, China).
+8. 
+What are the years with all resolutions in the data having full agreement?
+db.resolutions.aggregate([
+   {
+      $match: {
+         "voting.voting_yes_percentage": 100, // Filter documents with 100% voting_yes_percentage
+         "year": { $exists: true } // Assuming you have the 'year' field
+      }
+   },
+   {
+      $group: {
+         _id: "$year"
+      }
+   },
+   {
+      $sort: { _id: 1 } // Optional: Sort the results by year in ascending order
+   }
+])
+  { _id: 1946 }, { _id: 1947 },
+  { _id: 1948 }, { _id: 1949 },
+  { _id: 1950 }, { _id: 1951 },
+  { _id: 1952 }, { _id: 1954 },
+  { _id: 1955 }, { _id: 1956 },
+  { _id: 1962 }, { _id: 1963 },
+  { _id: 1964 }, { _id: 1965 },
+  { _id: 1966 }, { _id: 1967 },
+  { _id: 1968 }, { _id: 1969 },
+  { _id: 1970 }, { _id: 1971 }
+
+We can also search for things greater than or equal to a particular integer. For instance, 
+How would we find the years with greater than or equal to 80 percent agreement?
+9.
+unitednations> db.resolutions.aggregate([
+...     {
+...         $match: {
+...             "voting.voting_yes_percentage": { $gte: 80 }
+...         }
+...     },
+...     {
+...         $group: {
+...             _id: "$year",
+...             count: { $sum: 1 }
+...         }
+...     }
+... ])
+[
+  { _id: 1984, count: 13 },
+  { _id: 1951, count: 1 },
+  { _id: 2023, count: 67 },
+  { _id: 2017, count: 90 },
+  { _id: 1967, count: 15 },
+  { _id: 2016, count: 92 },
+  { _id: 1993, count: 107 },
+  { _id: 1988, count: 21 },
+  { _id: 1966, count: 17 },
+  { _id: 1994, count: 163 },
+  { _id: 1977, count: 12 },
+  { _id: 1992, count: 72 },
+  { _id: 1979, count: 18 },
+  { _id: 2012, count: 74 },
+  { _id: 1949, count: 55 },
+  { _id: 1996, count: 117 },
+  { _id: 1965, count: 16 },
+  { _id: 2008, count: 140 },
+  { _id: 1950, count: 6 },
+  { _id: 2020, count: 34 }
+]
+Type "it" for more
+
+
+10. 
+How can we find the average votes for each year in the data?
+unitednations> db.resolutions.aggregate([
+   {
+      $match: {
+         "voting.voting_yes_percentage": { $exists: true }, // Ensure the field exists
+         "year": { $exists: true } // Assuming you have added the 'year' field as discussed earlier
+      }
+   },
+   {
+      $group: {
+         _id: "$year",
+         average_percentage: { $avg: "$voting.voting_yes_percentage" }
+      }
+   },
+   {
+      $sort: { _id: 1 } // Sort by year in ascending order
+   }
+])
+After using "it" a few times, we can see the data from the 90s to 2011. Here are the average voting results.
+unitednations> it
+[
+  { _id: 1992, average_percentage: 78.18681318681318 },
+  { _id: 1993, average_percentage: 91.92307692307692 },
+  { _id: 1994, average_percentage: 87.60526315789474 },
+  { _id: 1995, average_percentage: 96.35526315789474 },
+  { _id: 1996, average_percentage: 94.4672131147541 },
+  { _id: 1997, average_percentage: 97.50925925925925 },
+  { _id: 1998, average_percentage: 95 },
+  { _id: 1999, average_percentage: 86.36507936507937 },
+  { _id: 2000, average_percentage: 86.52678571428571 },
+  { _id: 2001, average_percentage: 97.65648854961832 },
+  { _id: 2002, average_percentage: 95.93548387096774 },
+  { _id: 2003, average_percentage: 97.30147058823529 },
+  { _id: 2004, average_percentage: 94.85185185185185 },
+  { _id: 2005, average_percentage: 95.55696202531645 },
+  { _id: 2006, average_percentage: 93.85714285714286 },
+  { _id: 2007, average_percentage: 95.91304347826087 },
+  { _id: 2008, average_percentage: 99.85 },
+  { _id: 2009, average_percentage: 99.29213483146067 },
+  { _id: 2010, average_percentage: 99.33333333333333 },
+  { _id: 2011, average_percentage: 96.18279569892474 }
+
+  
+
+VIZ IDEAS
+
+Something over time - number of resolutions over each eyar
+
+Cosine sim heatmap, groupby on top 10 SUBJECTS, similarity in topics/time/other areas???? I really wanna do this
+
+Direct Barchart comparisons
+
+One issue over time - linear regression? Predict Israel Palestine conflicts, are they increasing or decreasing in a certain timeframe?
+  
